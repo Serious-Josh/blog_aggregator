@@ -7,8 +7,8 @@ export type Config = {
     currentUserName: string;
 }
 
-export function setUser(curent_user_name: string): void{
-    const cfg = {dbUrl: "postgres://example", currentUserName: curent_user_name};
+export async function setUser(curent_user_name: string): Promise<void>{
+    const cfg = {dbUrl: "postgres://postgres:postgres@localhost:5432/gator", currentUserName: curent_user_name};
     writeConfig(cfg);
 }
 
