@@ -1,6 +1,8 @@
-import { get } from "node:http";
-import { setUser } from "./config.js";
-import { createUser, getUser } from "./lib/db/queries/users.js";
+import { readConfig, setUser } from "./config.js";
+import { createUser, getUser, clearUsers, selectUsers } from "./lib/db/queries/users.js";
+import { exit } from "node:process";
+import { feedFetch } from "./rss.js";
+import { json } from "node:stream/consumers";
 
 export type CommandHandler = (cmdName: string, ...args: string[]) => Promise<void>;
 
@@ -39,6 +41,49 @@ export async function registerUser(cmd: string, ...args: string[]){
     setUser(name);
     console.log("User was created.");
     console.log(result);
+}
+
+export async function resetUsers(cmd: string, ...args: string[]){
+    try{
+        await clearUsers();
+    }
+    catch(e){
+        if (e instanceof Error){
+            console.log(e);
+            exit(1);
+        }
+    }
+    console.log("Users table was cleared.");
+}
+
+export async function getUsers(cmd: string, ...args: string[]){
+    let users: any[] = [];
+
+    try{
+        users = await selectUsers();
+    }
+    catch(e){
+        if (e instanceof Error){
+            console.log(e);
+            exit(1);
+        }
+    }
+
+    const curretnUser = readConfig().currentUserName;
+
+    users.forEach(user => {
+        if(user.name == curretnUser){
+            console.log(`* ${user.name} (current)`);
+        }
+        else{
+            console.log(`* ${user.name}`);
+        }
+    });
+}
+
+export async function aggCommand(cmd: string, ...args: string[]){
+    const response = await feedFetch("https://www.wagslane.dev/index.xml")
+    console.log(JSON.stringify(response, null, 2));
 }
 
 export function registerCommand(registry: CommandsRegistry, cmdName: string, handler: CommandHandler){
