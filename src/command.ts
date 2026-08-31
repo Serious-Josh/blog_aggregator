@@ -2,11 +2,13 @@ import { readConfig, setUser } from "./config.js";
 import { createUser, getUser, clearUsers, selectUsers } from "./lib/db/queries/users.js";
 import { exit } from "node:process";
 import { feedFetch } from "./rss.js";
-import { json } from "node:stream/consumers";
+import { createFeed } from "./lib/db/queries/feeds.js";
+import { feeds, users } from "./lib/db/schema.js";
 
 export type CommandHandler = (cmdName: string, ...args: string[]) => Promise<void>;
-
 export type CommandsRegistry = Record<string, CommandHandler>;
+export type Feed = typeof feeds.$inferSelect;
+export type User = typeof users.$inferSelect;
 
 export async function handlerLogin(cmdName: string, ...args: string[]){
     if(args[0] == null){
@@ -81,6 +83,26 @@ export async function getUsers(cmd: string, ...args: string[]){
     });
 }
 
+export async function addFeed(cmd: string, ...args: string[]){
+    const name = args[0];
+    const url = args[1];
+    const currentUser = (await getUser(readConfig().currentUserName)).id;
+
+    if(name == null || url == null){
+        throw new Error("Invalid arguements provided.")
+    }
+
+    try{
+        createFeed(name, url, currentUser);
+    }
+    catch(e){
+        if(e instanceof Error){
+            console.log(e);
+            exit(1);
+        }
+    }
+}
+
 export async function aggCommand(cmd: string, ...args: string[]){
     const response = await feedFetch("https://www.wagslane.dev/index.xml")
     console.log(JSON.stringify(response, null, 2));
@@ -96,4 +118,17 @@ export async function runCommand(registry: CommandsRegistry, cmdName: string, ..
     }
 
     await registry[cmdName](cmdName, ...args);
+}
+
+
+
+//----------
+// Helpers
+//----------
+
+export function printFeed(feed: Feed, user: User){
+
+    //actually format this later
+    console.log(user);
+    console.log(feed);
 }
