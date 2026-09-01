@@ -1,14 +1,19 @@
 import { readConfig, setUser } from "./config.js";
-import { createUser, getUser, clearUsers, selectUsers } from "./lib/db/queries/users.js";
+import { createUser, getUser, clearUsers, selectUsers, getUserFromUUID } from "./lib/db/queries/users.js";
 import { exit } from "node:process";
 import { feedFetch } from "./rss.js";
-import { createFeed } from "./lib/db/queries/feeds.js";
+import { createFeed, selectFeeds } from "./lib/db/queries/feeds.js";
 import { feeds, users } from "./lib/db/schema.js";
 
 export type CommandHandler = (cmdName: string, ...args: string[]) => Promise<void>;
 export type CommandsRegistry = Record<string, CommandHandler>;
 export type Feed = typeof feeds.$inferSelect;
 export type User = typeof users.$inferSelect;
+
+
+// -----------------
+// Users
+// -----------------
 
 export async function handlerLogin(cmdName: string, ...args: string[]){
     if(args[0] == null){
@@ -83,6 +88,11 @@ export async function getUsers(cmd: string, ...args: string[]){
     });
 }
 
+
+// -----------------
+// Feeds
+// -----------------
+
 export async function addFeed(cmd: string, ...args: string[]){
     const name = args[0];
     const url = args[1];
@@ -93,7 +103,7 @@ export async function addFeed(cmd: string, ...args: string[]){
     }
 
     try{
-        createFeed(name, url, currentUser);
+        await createFeed(name, url, currentUser);
     }
     catch(e){
         if(e instanceof Error){
@@ -102,6 +112,30 @@ export async function addFeed(cmd: string, ...args: string[]){
         }
     }
 }
+
+export async function getFeeds(cmd: string, ...args: string[]){
+    let feeds: { id: string; createdAt: Date; updatedAt: Date; name: string; url: string; user_id: string; }[] = [];
+
+    try{
+        feeds = await selectFeeds();
+    }
+    catch(e){
+        if (e instanceof Error){
+            console.log(e);
+            exit(1);
+        }
+    }
+
+    for (const feed of feeds){
+        const user = await getUserFromUUID(feed.user_id);
+        printFeed(feed, user);
+    }
+}
+
+
+// -----------------
+// General
+// -----------------
 
 export async function aggCommand(cmd: string, ...args: string[]){
     const response = await feedFetch("https://www.wagslane.dev/index.xml")
@@ -121,14 +155,13 @@ export async function runCommand(registry: CommandsRegistry, cmdName: string, ..
 }
 
 
-
-//----------
+// -----------------
 // Helpers
-//----------
+// -----------------
 
 export function printFeed(feed: Feed, user: User){
 
-    //actually format this later
-    console.log(user);
-    console.log(feed);
+    console.log(`"${feed.name}"`);
+    console.log(`"${feed.url}"`);
+    console.log(`Created by: "${user.name}"`);
 }
