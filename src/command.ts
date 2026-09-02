@@ -2,8 +2,9 @@ import { readConfig, setUser } from "./config.js";
 import { createUser, getUser, clearUsers, selectUsers, getUserFromUUID } from "./lib/db/queries/users.js";
 import { exit } from "node:process";
 import { feedFetch } from "./rss.js";
-import { createFeed, selectFeeds } from "./lib/db/queries/feeds.js";
+import { createFeed, getFeed, selectFeeds } from "./lib/db/queries/feeds.js";
 import { feeds, users } from "./lib/db/schema.js";
+import { createFeedFollow, getFeedFollowsForUser } from "./lib/db/queries/feed_follows.js";
 
 export type CommandHandler = (cmdName: string, ...args: string[]) => Promise<void>;
 export type CommandsRegistry = Record<string, CommandHandler>;
@@ -76,7 +77,7 @@ export async function getUsers(cmd: string, ...args: string[]){
         }
     }
 
-    const curretnUser = readConfig().currentUserName;
+    const curretnUser = getCurrentUser();
 
     users.forEach(user => {
         if(user.name == curretnUser){
@@ -96,14 +97,18 @@ export async function getUsers(cmd: string, ...args: string[]){
 export async function addFeed(cmd: string, ...args: string[]){
     const name = args[0];
     const url = args[1];
-    const currentUser = (await getUser(readConfig().currentUserName)).id;
+    const userName = getCurrentUser();
+    const currentUser = (await getUser(userName)).id;
 
     if(name == null || url == null){
         throw new Error("Invalid arguements provided.")
     }
 
     try{
-        await createFeed(name, url, currentUser);
+        const feed = await createFeed(name, url, currentUser);
+        const feedFollow = await createFeedFollow(currentUser, feed.id)
+
+        console.log(`User ${userName} followed "${feedFollow.feedName}"`);
     }
     catch(e){
         if(e instanceof Error){
@@ -129,6 +134,48 @@ export async function getFeeds(cmd: string, ...args: string[]){
     for (const feed of feeds){
         const user = await getUserFromUUID(feed.user_id);
         printFeed(feed, user);
+    }
+}
+
+// Feed Follows
+    
+export async function followCommand(cmd: string, ...args: string[]){
+    const url = args[0];
+    const currentUser = getCurrentUser();
+    let feedFollow: { id: string; createdAt: Date; updatedAt: Date; userID: string; feedID: string; usersName: string; feedName: string; feedUrl: string};
+
+    try{
+        const feed = await getFeed(url);
+        const user = await getUser(currentUser);
+
+        feedFollow = await createFeedFollow(user.id, feed.id);
+
+        console.log(`User ${currentUser} followed "${feedFollow.feedName}"`);
+    }
+    catch(e){
+        if (e instanceof Error){
+            console.log(e);
+            exit(1);
+        }
+    }
+}
+
+export async function followingCommand(cmd: string, ...args: string[]){
+    const name = getCurrentUser();
+    
+    try{
+        const user = await getUser(name);
+        const feeds = await getFeedFollowsForUser(user.id);
+
+        for(const feed of feeds){
+            console.log(`${feed.feedName}`);
+        }
+    }
+    catch(e){
+        if (e instanceof Error){
+            console.log(e);
+            exit(1);
+        }
     }
 }
 
@@ -164,4 +211,8 @@ export function printFeed(feed: Feed, user: User){
     console.log(`"${feed.name}"`);
     console.log(`"${feed.url}"`);
     console.log(`Created by: "${user.name}"`);
+}
+
+function getCurrentUser(){
+    return readConfig().currentUserName;
 }
