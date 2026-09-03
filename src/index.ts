@@ -1,8 +1,9 @@
-import {addFeed, aggCommand, CommandsRegistry, followCommand, followingCommand, getFeeds, getUsers, handlerLogin, registerUser, resetUsers, runCommand} from "./command.js"
+import {addFeed, aggCommand, CommandsRegistry, followCommand, followingCommand, getFeeds, getUsers, handlerLogin, middlewareLoggedIn, registerUser, resetUsers, runCommand, unfollowCommand} from "./command.js"
 import { exit } from "node:process";
 
 async function main(){
-    const registry: CommandsRegistry = {"login": handlerLogin, "register": registerUser, "reset": resetUsers, "users": getUsers, "agg": aggCommand, "addfeed": addFeed, "feeds": getFeeds, "follow": followCommand, "following": followingCommand};
+    const registry: CommandsRegistry = {"login": handlerLogin, "register": registerUser, "reset": resetUsers, "users": getUsers, "agg": aggCommand, "addfeed": middlewareLoggedIn(addFeed),
+                                        "feeds": getFeeds, "follow": middlewareLoggedIn(followCommand), "following": middlewareLoggedIn(followingCommand), "unfollow": middlewareLoggedIn(unfollowCommand)};
     const args: string[] = process.argv.slice(2);
 
     if(args[0] == null){

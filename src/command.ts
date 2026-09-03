@@ -4,12 +4,14 @@ import { exit } from "node:process";
 import { feedFetch } from "./rss.js";
 import { createFeed, getFeed, selectFeeds } from "./lib/db/queries/feeds.js";
 import { feeds, users } from "./lib/db/schema.js";
-import { createFeedFollow, getFeedFollowsForUser } from "./lib/db/queries/feed_follows.js";
+import { createFeedFollow, deleteFeedFollows, getFeedFollowsForUser } from "./lib/db/queries/feed_follows.js";
 
 export type CommandHandler = (cmdName: string, ...args: string[]) => Promise<void>;
 export type CommandsRegistry = Record<string, CommandHandler>;
 export type Feed = typeof feeds.$inferSelect;
 export type User = typeof users.$inferSelect;
+type UserCommandHandler = (cmdName: string, user: User, ...args: string[]) => Promise<void>;
+type middlewareLoggedIn = (handler: UserCommandHandler) => CommandHandler;
 
 
 // -----------------
@@ -94,21 +96,19 @@ export async function getUsers(cmd: string, ...args: string[]){
 // Feeds
 // -----------------
 
-export async function addFeed(cmd: string, ...args: string[]){
+export async function addFeed(cmd: string, user: User, ...args: string[]){
     const name = args[0];
     const url = args[1];
-    const userName = getCurrentUser();
-    const currentUser = (await getUser(userName)).id;
 
     if(name == null || url == null){
         throw new Error("Invalid arguements provided.")
     }
 
     try{
-        const feed = await createFeed(name, url, currentUser);
-        const feedFollow = await createFeedFollow(currentUser, feed.id)
+        const feed = await createFeed(name, url, user.id);
+        const feedFollow = await createFeedFollow(user.id, feed.id)
 
-        console.log(`User ${userName} followed "${feedFollow.feedName}"`);
+        console.log(`User ${user.name} followed "${feedFollow.feedName}"`);
     }
     catch(e){
         if(e instanceof Error){
@@ -139,18 +139,16 @@ export async function getFeeds(cmd: string, ...args: string[]){
 
 // Feed Follows
     
-export async function followCommand(cmd: string, ...args: string[]){
+export async function followCommand(cmd: string, user: User, ...args: string[]){
     const url = args[0];
-    const currentUser = getCurrentUser();
     let feedFollow: { id: string; createdAt: Date; updatedAt: Date; userID: string; feedID: string; usersName: string; feedName: string; feedUrl: string};
 
     try{
         const feed = await getFeed(url);
-        const user = await getUser(currentUser);
 
         feedFollow = await createFeedFollow(user.id, feed.id);
 
-        console.log(`User ${currentUser} followed "${feedFollow.feedName}"`);
+        console.log(`User ${user.name} followed "${feedFollow.feedName}"`);
     }
     catch(e){
         if (e instanceof Error){
@@ -160,11 +158,8 @@ export async function followCommand(cmd: string, ...args: string[]){
     }
 }
 
-export async function followingCommand(cmd: string, ...args: string[]){
-    const name = getCurrentUser();
-    
+export async function followingCommand(cmd: string, user: User, ...args: string[]){
     try{
-        const user = await getUser(name);
         const feeds = await getFeedFollowsForUser(user.id);
 
         for(const feed of feeds){
@@ -179,10 +174,48 @@ export async function followingCommand(cmd: string, ...args: string[]){
     }
 }
 
+export async function unfollowCommand(cmd: string, user: User, ...args: string[]){
+    const feedURL = args[0];
+
+    if(!feedURL){
+        throw new Error("No feed provided.");
+    }
+    
+
+    try{
+        const feed = await getFeed(feedURL);
+        await deleteFeedFollows(user.id, feed.id);
+    }
+    catch(e){
+        if(e instanceof Error){
+            console.log(e);
+            exit(1);
+        }
+    }
+}
+
 
 // -----------------
 // General
 // -----------------
+
+export function middlewareLoggedIn(handler: UserCommandHandler): CommandHandler{
+    return async (cmdName: string, ...args: string[]): Promise<void> => {
+        const name = readConfig().currentUserName
+
+        if(!name){
+            throw new Error("No logged in user");
+        }
+
+        const user = await getUser(name);
+
+        if (!user) {
+            throw new Error(`User ${name} not found`);
+        }
+
+        await handler(cmdName, user, ...args);
+    }
+}
 
 export async function aggCommand(cmd: string, ...args: string[]){
     const response = await feedFetch("https://www.wagslane.dev/index.xml")
