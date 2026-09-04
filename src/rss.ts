@@ -29,7 +29,14 @@ export async function feedFetch(feedURL: string){
 
     const parsed_data = parser.parse(data)["rss"];
 
-    let output = {};
+    let output: RSSFeed = {
+        channel: {
+            title: "",
+            link: "",
+            description: "",
+            item: []
+        }
+    };
 
     if("channel" in parsed_data){
         if("title" in parsed_data["channel"] && "link" in parsed_data["channel"] && "description" in parsed_data["channel"]){

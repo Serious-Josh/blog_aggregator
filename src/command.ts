@@ -2,7 +2,7 @@ import { readConfig, setUser } from "./config.js";
 import { createUser, getUser, clearUsers, selectUsers, getUserFromUUID } from "./lib/db/queries/users.js";
 import { exit } from "node:process";
 import { feedFetch } from "./rss.js";
-import { createFeed, getFeed, selectFeeds } from "./lib/db/queries/feeds.js";
+import { createFeed, getFeed, getNextFeedToFetch, markFeedFetched, selectFeeds } from "./lib/db/queries/feeds.js";
 import { feeds, users } from "./lib/db/schema.js";
 import { createFeedFollow, deleteFeedFollows, getFeedFollowsForUser } from "./lib/db/queries/feed_follows.js";
 
@@ -119,10 +119,13 @@ export async function addFeed(cmd: string, user: User, ...args: string[]){
 }
 
 export async function getFeeds(cmd: string, ...args: string[]){
-    let feeds: { id: string; createdAt: Date; updatedAt: Date; name: string; url: string; user_id: string; }[] = [];
-
     try{
-        feeds = await selectFeeds();
+        const feeds = await selectFeeds();
+
+        for (const feed of feeds){
+            const user = await getUserFromUUID(feed.user_id);
+            printFeed(feed, user);
+        }
     }
     catch(e){
         if (e instanceof Error){
@@ -130,10 +133,24 @@ export async function getFeeds(cmd: string, ...args: string[]){
             exit(1);
         }
     }
+}
 
-    for (const feed of feeds){
-        const user = await getUserFromUUID(feed.user_id);
-        printFeed(feed, user);
+export async function scrapeFeeds(){
+    try{
+        const feed = await getNextFeedToFetch();
+
+        const response = await feedFetch(feed.url)
+        await markFeedFetched(feed.id);
+
+        for(const items of response.channel.item){
+            console.log(items.title);
+        }
+    }
+    catch(e){
+        if (e instanceof Error){
+            console.log(e);
+            exit(1);
+        }
     }
 }
 
@@ -141,12 +158,11 @@ export async function getFeeds(cmd: string, ...args: string[]){
     
 export async function followCommand(cmd: string, user: User, ...args: string[]){
     const url = args[0];
-    let feedFollow: { id: string; createdAt: Date; updatedAt: Date; userID: string; feedID: string; usersName: string; feedName: string; feedUrl: string};
 
     try{
         const feed = await getFeed(url);
 
-        feedFollow = await createFeedFollow(user.id, feed.id);
+        const feedFollow = await createFeedFollow(user.id, feed.id);
 
         console.log(`User ${user.name} followed "${feedFollow.feedName}"`);
     }
@@ -218,8 +234,51 @@ export function middlewareLoggedIn(handler: UserCommandHandler): CommandHandler{
 }
 
 export async function aggCommand(cmd: string, ...args: string[]){
-    const response = await feedFetch("https://www.wagslane.dev/index.xml")
-    console.log(JSON.stringify(response, null, 2));
+    if(!args[0]){
+        throw new Error(`No arguements provided.`);
+    }
+
+    if(args.length > 1){
+        throw new Error ("More than one arguement provided.");
+    }
+
+    const time = args[0];
+    const regex = /^(\d+)(ms|s|m|h)$/;
+    const match = time.match(regex);
+
+    if(match == null){
+        throw new Error("Invalid arguement.");
+    }
+
+    let timeBetweenRequests = +match[1];
+
+    switch(match[2]){
+        case "s":
+            timeBetweenRequests *= 1_000;
+            break;
+        case "m":
+            timeBetweenRequests *= 60_000;
+            break;
+        case "h":
+            timeBetweenRequests *= 3_600_000;
+            break;
+    }
+
+    console.log(`Feed aggregator starting... Interval set to ${time}...`);
+
+    scrapeFeeds().catch(handleError);
+
+    const interval = setInterval(() => {
+        scrapeFeeds().catch(handleError);
+    }, timeBetweenRequests);
+
+    await new Promise<void>((resolve) => {
+        process.on("SIGINT", () => {
+            console.log("Shutting down feed aggregator...");
+            clearInterval(interval);
+            resolve();
+        })
+    })
 }
 
 export function registerCommand(registry: CommandsRegistry, cmdName: string, handler: CommandHandler){
@@ -248,4 +307,10 @@ export function printFeed(feed: Feed, user: User){
 
 function getCurrentUser(){
     return readConfig().currentUserName;
+}
+
+function handleError(err: unknown) {
+  console.error(
+    `Error scraping feeds: ${err instanceof Error ? err.message : err}`,
+  );
 }
