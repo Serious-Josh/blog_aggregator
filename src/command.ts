@@ -3,8 +3,9 @@ import { createUser, getUser, clearUsers, selectUsers, getUserFromUUID } from ".
 import { exit } from "node:process";
 import { feedFetch } from "./rss.js";
 import { createFeed, getFeed, getNextFeedToFetch, markFeedFetched, selectFeeds } from "./lib/db/queries/feeds.js";
-import { feeds, users } from "./lib/db/schema.js";
+import { feeds, users, NewPost } from "./lib/db/schema.js";
 import { createFeedFollow, deleteFeedFollows, getFeedFollowsForUser } from "./lib/db/queries/feed_follows.js";
+import { createPost, getPostsForUser } from "./lib/db/queries/posts.js";
 
 export type CommandHandler = (cmdName: string, ...args: string[]) => Promise<void>;
 export type CommandsRegistry = Record<string, CommandHandler>;
@@ -139,17 +140,23 @@ export async function scrapeFeeds(){
     try{
         const feed = await getNextFeedToFetch();
 
+        if(!feed){
+            throw new Error("No feeds to scrape.");
+        }
+
         const response = await feedFetch(feed.url)
         await markFeedFetched(feed.id);
 
         for(const items of response.channel.item){
-            console.log(items.title);
+
+            const newPost: NewPost = {title: items.title, url: items.link, description: items.description, publishedAt: new Date(items.pubDate), feed_id: feed.id};
+            await createPost(newPost);
         }
     }
     catch(e){
         if (e instanceof Error){
             console.log(e);
-            exit(1);
+            return;
         }
     }
 }
@@ -206,6 +213,33 @@ export async function unfollowCommand(cmd: string, user: User, ...args: string[]
         if(e instanceof Error){
             console.log(e);
             exit(1);
+        }
+    }
+}
+
+
+// -----------------
+// Posts
+// -----------------
+
+export async function  browseCommand(cmd: string, user: User, ...args: string[]){
+    let limit = +args[0];
+
+    if(!limit){
+        limit = 2;
+    }
+
+    try{
+        const posts = await getPostsForUser(user.id, limit)
+
+        for(const post of posts){
+            printPost(post);
+        }
+    }
+    catch(e){
+        if(e instanceof Error){
+            console.log(e);
+            return;
         }
     }
 }
@@ -313,4 +347,11 @@ function handleError(err: unknown) {
   console.error(
     `Error scraping feeds: ${err instanceof Error ? err.message : err}`,
   );
+}
+
+function printPost(post: NewPost){
+    console.log(`Title: ${post.title}`);
+    console.log(`URL: ${post.url}`);
+    console.log(`Description: ${post.description}`);
+    console.log(`Published: ${post.publishedAt}`);
 }
